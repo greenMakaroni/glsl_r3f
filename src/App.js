@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import React, { useRef, Suspense } from "react"
-import { Canvas, extend, useFrame } from "@react-three/fiber"
+import { Canvas, extend, useFrame, useLoader } from "@react-three/fiber"
 import { shaderMaterial } from "@react-three/drei";
 import glsl from "babel-plugin-glsl/macro"
 import './App.css';
@@ -13,7 +13,11 @@ const WaveShaderMaterial = shaderMaterial(
   // Uniform
   // create uColor prop, set default value to black (0,0,0)
   // we can still pass not default color via jsx prop uColor
-  { uTime: 0, uColor: new THREE.Color(0.0, 0.0, 0.0) }, // lower u denotes that its a uniform
+  { 
+    uTime: 0, 
+    uColor: new THREE.Color(0.0, 0.0, 0.0),
+    uTexture: new THREE.Texture()
+  }, // lower u denotes that its a uniform
   // Vertex shaders run first, it receives attributes
   // and calculates / manipulates the position of each individual vertex
   // it position the vertices of the geometry
@@ -21,16 +25,27 @@ const WaveShaderMaterial = shaderMaterial(
   // Vertex shader
   glsl`
     // varying enables us to send data from vertex shader to fragment shader **********
-    varying vec2 vUv; // lower case v lets us know that its a varying
+    precision mediump float;
+    varying vec2 vUv;
+    varying float vWave;
+    uniform float uTime;
+    #pragma glslify: snoise3 = require(glsl-noise/simplex/3d);
+
     void main() {
       // uv is globaly accessible for a vertex shader, we assign it to varying variable to send it to fragment shader
       vUv = uv;
+      vec3 pos = position;
+      float noiseFreq = 2.0;
+      float noiseAmp = 0.4;
+      vec3 noisePos = vec3(pos.x * noiseFreq + uTime, pos.y, pos.z);
+      pos.z += snoise3(noisePos) * noiseAmp;
+      vWave = pos.z;
       // gl_Position contains position of the vertex on the screen
       // modelMatrix applies all transformations related to the mesh (scale, rotation, translation all are contained here and applied to the position)
       // viewMatrix applies all transformations related to the camera (scale, rotation, translation all are contained here and applied to the position)
       // projectionMatrix transforms collected coordinates and displaces the final clip space
       // modelViewMatrix is modelMatrix and viewMatrix combined
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
     }
   `,  
 
@@ -38,15 +53,18 @@ const WaveShaderMaterial = shaderMaterial(
   // of each individual "fragment" pixel of the geometry
   // Fragment shader
   glsl`
-    precision mediump float; // this allows to determine how much precision does gpu uses when calculating floats ("low", "medium", "high")
-    
+    precision mediump float;
     uniform vec3 uColor;
     uniform float uTime;
+    uniform sampler2D uTexture;
+    varying vec2 vUv;
+    varying float vWave;
 
-    varying vec2 vUv; // vUv = uv; // uv from vertex shader passed via varying
     void main() {
+      float wave = vWave * 0.2;
+      vec3 texture = texture2D(uTexture, vUv + wave).rgb;
       //vec4 can be used as rgba (red, green, blue, alpha)
-      gl_FragColor = vec4(sin(vUv.y + uTime) * uColor, 1.0);
+      gl_FragColor = vec4(texture, 1.0);
     }
   `
 );
@@ -56,23 +74,27 @@ extend({ WaveShaderMaterial });
 
 const Wave = () => {
   const ref = useRef();
+
+  const [image] = useLoader(THREE.TextureLoader, [
+    "./bear.jpg",
+  ]);
+
   useFrame(({ clock }) => (ref.current.uTime = clock.getElapsedTime()))
   return(
     <mesh>
-      <planeBufferGeometry args={[3, 5]} />
+      <planeBufferGeometry args={[0.4, 0.5, 16, 16]} />
       {/* <meshStandardMaterial color="blue" /> */}
 
       {/* note the lower case when calling our shader */}
-      <waveShaderMaterial ref={ref} uColor={"gold"}/>
+      <waveShaderMaterial ref={ref} uColor={"gold"} uTexture={image}/>
   </mesh>
   )
 }
 
 const Scene = () => {
   return(
-    <Canvas>
+    <Canvas camera={{fov: 10}}>
       <Suspense fallback={null}>
-        <pointLight position={[10, 10, 10]}/>
         <Wave />
       </Suspense>
     </Canvas>
